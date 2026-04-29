@@ -1,0 +1,137 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Item;
+use App\Models\Category;
+use App\Models\Safe;
+use Illuminate\Http\Request;
+
+class ItemController extends Controller
+{
+    /**
+     * Display a listing of items.
+     */
+    public function index(Request $request)
+    {
+        $query = Item::with('category');
+
+        // 🔍 Search (name or item_code)
+        if ($request->filled('search')) {
+            $query->where(function ($q) use ($request) {
+                $q->where('name', 'like', '%' . $request->search . '%')
+                  ->orWhere('item_code', 'like', '%' . $request->search . '%');
+            });
+        }
+
+        // 📂 Filter by category
+        if ($request->filled('category')) {
+            $query->where('category_id', $request->category);
+        }
+
+        // 📊 Filter by availability
+        if ($request->filled('status')) {
+            if ($request->status === 'available') {
+                $query->where('is_available', true);
+            } elseif ($request->status === 'loaned') {
+                $query->where('is_available', false);
+            }
+        }
+
+        // 📦 Default behavior (if no status filter = show all OR only available)
+        if (!$request->filled('status')) {
+            $query->where('is_available', true); // keep your original behavior
+        }
+
+        $items = $query->latest()->paginate(15)->withQueryString();
+
+        // 🔥 IMPORTANT (for dropdown)
+        $categories = Category::all();
+
+        return view('items.index', compact('items', 'categories'));
+    }
+
+    /**
+     * Show the form for creating a new item.
+     */
+    public function create()
+    {
+        $categories = Category::all();
+        $safes = Safe::where('status', 'active')->get();
+        return view('items.create', compact('categories', 'safes'));
+    }
+
+    /**
+     * Store a newly created item in storage.
+     */
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'category_id' => 'required|exists:categories,id',
+            'safe_id' => 'nullable|exists:safes,id',
+            'appraised_value' => 'required|numeric|min:0',
+            'condition' => 'required|in:excellent,good,fair,poor',
+            'location' => 'nullable|string|max:255',
+            'notes' => 'nullable|string',
+        ]);
+
+        // Generate item code
+        $validated['item_code'] = 'ITEM-' . now()->format('YmdHis') . '-' . str_pad(rand(0, 999), 3, '0', STR_PAD_LEFT);
+
+        Item::create($validated);
+
+        return redirect()->route('items.index')->with('success', 'Item added successfully!');
+    }
+
+    /**
+     * Display the specified item.
+     */
+    public function show(Item $item)
+    {
+        $item->load('category', 'loans');
+        return view('items.show', compact('item'));
+    }
+
+    /**
+     * Show the form for editing the specified item.
+     */
+    public function edit(Item $item)
+    {
+        $categories = Category::all();
+        $safes = Safe::where('status', 'active')->get();
+        return view('items.edit', compact('item', 'categories', 'safes'));
+    }
+
+    /**
+     * Update the specified item in storage.
+     */
+    public function update(Request $request, Item $item)
+    {
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'category_id' => 'required|exists:categories,id',
+            'safe_id' => 'nullable|exists:safes,id',
+            'appraised_value' => 'required|numeric|min:0',
+            'condition' => 'required|in:excellent,good,fair,poor',
+            'location' => 'nullable|string|max:255',
+            'notes' => 'nullable|string',
+            'is_available' => 'nullable|boolean',
+        ]);
+
+        $item->update($validated);
+
+        return redirect()->route('items.index')->with('success', 'Item updated successfully!');
+    }
+
+    /**
+     * Remove the specified item from storage.
+     */
+    public function destroy(Item $item)
+    {
+        $item->delete();
+        return redirect()->route('items.index')->with('success', 'Item deleted successfully!');
+    }
+}
